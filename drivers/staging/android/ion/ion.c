@@ -1,5 +1,4 @@
 /*
-
  * drivers/gpu/ion/ion.c
  *
  * Copyright (C) 2011 Google, Inc.
@@ -214,10 +213,10 @@ static struct ion_buffer *ion_buffer_create(struct ion_heap *heap,
 			"heap->ops->map_dma should return ERR_PTR on error"))
 		table = ERR_PTR(-EINVAL);
 	if (IS_ERR(table)) {
-		heap->ops->free(buffer);
-		kfree(buffer);
-		return ERR_PTR(PTR_ERR(table));
+		ret = -EINVAL;
+		goto err1;
 	}
+
 	buffer->sg_table = table;
 	if (ion_buffer_fault_user_mappings(buffer)) {
 		int num_pages = PAGE_ALIGN(buffer->size) / PAGE_SIZE;
@@ -227,7 +226,7 @@ static struct ion_buffer *ion_buffer_create(struct ion_heap *heap,
 		buffer->pages = vmalloc(sizeof(struct page *) * num_pages);
 		if (!buffer->pages) {
 			ret = -ENOMEM;
-			goto err1;
+			goto err;
 		}
 
 		for_each_sg(table->sgl, sg, table->nents, i) {
@@ -236,9 +235,6 @@ static struct ion_buffer *ion_buffer_create(struct ion_heap *heap,
 			for (j = 0; j < sg->length / PAGE_SIZE; j++)
 				buffer->pages[k++] = page++;
 		}
-
-		if (ret)
-			goto err;
 	}
 
 	buffer->dev = dev;
@@ -262,10 +258,8 @@ static struct ion_buffer *ion_buffer_create(struct ion_heap *heap,
 
 err:
 	heap->ops->unmap_dma(heap, buffer);
-	heap->ops->free(buffer);
 err1:
-	if (buffer->pages)
-		vfree(buffer->pages);
+	heap->ops->free(buffer);
 err2:
 	kfree(buffer);
 	return ERR_PTR(ret);
@@ -390,16 +384,6 @@ static void ion_handle_get(struct ion_handle *handle)
 	kref_get(&handle->ref);
 }
 
-/* Must hold the client lock */
-static struct ion_handle *ion_handle_get_check_overflow(
-	struct ion_handle *handle)
-{
-	if (atomic_read(&handle->ref.refcount) + 1 == 0)
-		return ERR_PTR(-EOVERFLOW);
-	ion_handle_get(handle);
-	return handle;
-}
-
 static int ion_handle_put_nolock(struct ion_handle *handle)
 {
 	int ret;
@@ -446,9 +430,8 @@ static struct ion_handle *ion_handle_get_by_id_nolock(struct ion_client *client,
 
 	handle = idr_find(&client->idr, id);
 	if (handle)
-		return ion_handle_get_check_overflow(handle);
-
-	return ERR_PTR(-EINVAL);
+		ion_handle_get(handle);
+	return handle;
 }
 
 struct ion_handle *ion_handle_get_by_id(struct ion_client *client,
@@ -1869,4 +1852,4 @@ void __init ion_reserve(struct ion_platform_data *data)
 			data->heaps[i].base,
 			data->heaps[i].size);
 	}
-}
+}str
